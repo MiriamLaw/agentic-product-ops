@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "title": "BE: Fix login timeout bug",
+    "description": "Users intermittently time out during login.",
+    "type": "bug",
+    "status": "open",
+    "priority": "high"
+  },
+  {
+    "id": 2,
+    "title": "FE: Add acceptance criteria to reporting story",
+    "description": "Story exists but needs clearer front-end requirements.",
+    "type": "task",
+    "status": "open",
+    "priority": "medium"
+  }
+]
