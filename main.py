@@ -81,45 +81,75 @@ def calculate_readiness_score(issue):
     return score
 
 
+def get_ticket_issues(issue):
+    problems = []
+
+    title = issue.get("title", "")
+    body = issue.get("body") or ""
+
+    # Missing sections
+    if "## Acceptance Criteria".lower() not in body.lower():
+        problems.append("Missing Acceptance Criteria")
+
+    if "## Priority".lower() not in body.lower():
+        problems.append("Missing Priority")
+
+    if "## Potential Subtasks".lower() not in body.lower():
+        problems.append("Missing Potential Subtasks")
+
+    if classify_issue_type(title) == "Feature" and "## User Value".lower() not in body.lower():
+        problems.append("Missing User Value")
+
+    # Weak title
+    if is_vague_title(title):
+        problems.append("Vague Title")
+
+    # Weak summary
+    if "## Summary" in body:
+        summary_section = body.split("## Summary")[-1][:150]
+        if len(summary_section.strip()) < 40:
+            problems.append("Weak Summary")
+
+    # Too large
+    if is_large_story(body):
+        problems.append("Likely Too Large")
+
+    return problems
+
+
 # --- ANALYSIS ---
 
 def analyze_issues(issues):
     sprint_candidates = []
     high_priority_bugs = []
-    vague_titles = []
-    large_stories = []
+    diagnostics = []
 
     for issue in issues:
         title = issue["title"]
-        body = issue.get("body") or ""
         number = issue["number"]
 
         score = calculate_readiness_score(issue)
+        problems = get_ticket_issues(issue)
 
         if is_high_priority_bug(issue):
             high_priority_bugs.append((number, title))
 
-        if is_vague_title(title):
-            vague_titles.append((number, title))
-
-        if is_large_story(body):
-            large_stories.append((number, title))
+        if problems:
+            diagnostics.append((number, title, problems))
 
         if score >= 7:
             sprint_candidates.append((number, title, score))
 
     return {
         "high_priority_bugs": high_priority_bugs,
-        "vague_titles": vague_titles,
-        "large_stories": large_stories,
+        "diagnostics": diagnostics,
         "sprint_candidates": sorted(sprint_candidates, key=lambda x: -x[2])[:5],
     }
-
 
 # --- OUTPUT ---
 
 def print_report(results):
-    print("\n=== Agentic Product Ops: v2 Report ===\n")
+    print("\n=== Agentic Product Ops: v2.1 Diagnostics Report ===\n")
 
     print("🔥 High Priority Bugs:")
     for i in results["high_priority_bugs"]:
@@ -127,16 +157,12 @@ def print_report(results):
     if not results["high_priority_bugs"]:
         print("  - None")
 
-    print("\n⚠️ Vague Tickets:")
-    for i in results["vague_titles"]:
-        print(f"  - #{i[0]}: {i[1]}")
-    if not results["vague_titles"]:
-        print("  - None")
-
-    print("\n📦 Likely Too Large Stories:")
-    for i in results["large_stories"]:
-        print(f"  - #{i[0]}: {i[1]}")
-    if not results["large_stories"]:
+    print("\n⚠️ Ticket Diagnostics:")
+    for number, title, problems in results["diagnostics"]:
+        print(f"\n  #{number}: {title}")
+        for p in problems:
+            print(f"    - {p}")
+    if not results["diagnostics"]:
         print("  - None")
 
     print("\n🎯 Suggested Sprint Candidates:")
