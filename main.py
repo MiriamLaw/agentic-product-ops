@@ -8,9 +8,6 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_OWNER = os.getenv("GITHUB_OWNER")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 
-if not GITHUB_TOKEN or not GITHUB_OWNER or not GITHUB_REPO:
-    raise ValueError("Missing GITHUB_TOKEN, GITHUB_OWNER, or GITHUB_REPO in .env")
-
 API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/issues"
 
 HEADERS = {
@@ -21,120 +18,131 @@ HEADERS = {
 
 
 def fetch_issues():
-    response = requests.get(API_URL, headers=HEADERS, timeout=30)
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"Failed to fetch issues. Status: {response.status_code}\n{response.text}"
-        )
-
+    response = requests.get(API_URL, headers=HEADERS)
     issues = response.json()
-
-    # Filter out pull requests just in case
-    issues = [issue for issue in issues if "pull_request" not in issue]
-
-    return issues
+    return [i for i in issues if "pull_request" not in i]
 
 
-def classify_issue_type(title: str) -> str:
-    title_lower = title.lower()
+# --- CLASSIFICATION ---
 
-    if title_lower.startswith("bug:"):
+def classify_issue_type(title):
+    title = title.lower()
+    if title.startswith("bug:"):
         return "Bug"
-    if title_lower.startswith("feature:"):
+    if title.startswith("feature:"):
         return "Feature"
-    if title_lower.startswith("task:"):
-        return "Task"
-    if title_lower.startswith("spike:"):
-        return "Spike"
-
-    return "Unknown"
+    return "Other"
 
 
-def has_section(body: str, section_name: str) -> bool:
+# --- HEURISTICS ---
+
+def is_high_priority_bug(issue):
+    return (
+        classify_issue_type(issue["title"]) == "Bug"
+        and "High" in (issue.get("body") or "")
+    )
+
+
+def is_vague_title(title):
+    vague_words = ["fix issue", "improve", "update", "thing", "stuff"]
+    title_lower = title.lower()
+    return any(word in title_lower for word in vague_words)
+
+
+def is_large_story(body):
+    if not body:
+        return True
+    return body.count("- [ ]") > 5
+
+
+def has_section(body, section):
     if not body:
         return False
-    return f"## {section_name}".lower() in body.lower()
+    return f"## {section}".lower() in body.lower()
 
 
-def missing_acceptance_criteria(body: str) -> bool:
-    if not body:
-        return True
+def calculate_readiness_score(issue):
+    body = issue.get("body") or ""
 
-    if "## Acceptance Criteria".lower() not in body.lower():
-        return True
+    score = 0
 
-    # Look for checklist items after acceptance criteria
-    return "- [ ]" not in body
+    if has_section(body, "Acceptance Criteria"):
+        score += 3
+    if has_section(body, "Priority"):
+        score += 2
+    if has_section(body, "Potential Subtasks"):
+        score += 2
+    if has_section(body, "User Value"):
+        score += 2
 
+    if not is_vague_title(issue["title"]):
+        score += 1
+
+    return score
+
+
+# --- ANALYSIS ---
 
 def analyze_issues(issues):
-    report = {
-        "total": len(issues),
-        "by_type": {},
-        "missing_acceptance_criteria": [],
-        "missing_priority": [],
-        "missing_potential_subtasks": [],
-        "missing_user_value": [],
-    }
+    sprint_candidates = []
+    high_priority_bugs = []
+    vague_titles = []
+    large_stories = []
 
     for issue in issues:
-        title = issue.get("title", "").strip()
-        body = issue.get("body", "") or ""
-        number = issue.get("number")
+        title = issue["title"]
+        body = issue.get("body") or ""
+        number = issue["number"]
 
-        issue_type = classify_issue_type(title)
-        report["by_type"][issue_type] = report["by_type"].get(issue_type, 0) + 1
+        score = calculate_readiness_score(issue)
 
-        if missing_acceptance_criteria(body):
-            report["missing_acceptance_criteria"].append((number, title))
+        if is_high_priority_bug(issue):
+            high_priority_bugs.append((number, title))
 
-        if not has_section(body, "Priority"):
-            report["missing_priority"].append((number, title))
+        if is_vague_title(title):
+            vague_titles.append((number, title))
 
-        if not has_section(body, "Potential Subtasks"):
-            report["missing_potential_subtasks"].append((number, title))
+        if is_large_story(body):
+            large_stories.append((number, title))
 
-        if issue_type == "Feature" and not has_section(body, "User Value"):
-            report["missing_user_value"].append((number, title))
+        if score >= 7:
+            sprint_candidates.append((number, title, score))
 
-    return report
+    return {
+        "high_priority_bugs": high_priority_bugs,
+        "vague_titles": vague_titles,
+        "large_stories": large_stories,
+        "sprint_candidates": sorted(sprint_candidates, key=lambda x: -x[2])[:5],
+    }
 
 
-def print_report(report):
-    print("\n=== Agentic Product Ops: Backlog Health Report ===\n")
-    print(f"Total issues analyzed: {report['total']}\n")
+# --- OUTPUT ---
 
-    print("Issue counts by type:")
-    for issue_type, count in report["by_type"].items():
-        print(f"  - {issue_type}: {count}")
+def print_report(results):
+    print("\n=== Agentic Product Ops: v2 Report ===\n")
 
-    print("\nIssues missing acceptance criteria:")
-    if report["missing_acceptance_criteria"]:
-        for number, title in report["missing_acceptance_criteria"]:
-            print(f"  - #{number}: {title}")
-    else:
+    print("🔥 High Priority Bugs:")
+    for i in results["high_priority_bugs"]:
+        print(f"  - #{i[0]}: {i[1]}")
+    if not results["high_priority_bugs"]:
         print("  - None")
 
-    print("\nIssues missing priority section:")
-    if report["missing_priority"]:
-        for number, title in report["missing_priority"]:
-            print(f"  - #{number}: {title}")
-    else:
+    print("\n⚠️ Vague Tickets:")
+    for i in results["vague_titles"]:
+        print(f"  - #{i[0]}: {i[1]}")
+    if not results["vague_titles"]:
         print("  - None")
 
-    print("\nIssues missing potential subtasks section:")
-    if report["missing_potential_subtasks"]:
-        for number, title in report["missing_potential_subtasks"]:
-            print(f"  - #{number}: {title}")
-    else:
+    print("\n📦 Likely Too Large Stories:")
+    for i in results["large_stories"]:
+        print(f"  - #{i[0]}: {i[1]}")
+    if not results["large_stories"]:
         print("  - None")
 
-    print("\nFeature issues missing user value section:")
-    if report["missing_user_value"]:
-        for number, title in report["missing_user_value"]:
-            print(f"  - #{number}: {title}")
-    else:
+    print("\n🎯 Suggested Sprint Candidates:")
+    for i in results["sprint_candidates"]:
+        print(f"  - #{i[0]}: {i[1]} (Score: {i[2]})")
+    if not results["sprint_candidates"]:
         print("  - None")
 
     print("\n=== End Report ===\n")
@@ -142,8 +150,8 @@ def print_report(report):
 
 def main():
     issues = fetch_issues()
-    report = analyze_issues(issues)
-    print_report(report)
+    results = analyze_issues(issues)
+    print_report(results)
 
 
 if __name__ == "__main__":
