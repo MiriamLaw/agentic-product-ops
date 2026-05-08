@@ -1,12 +1,14 @@
 import os
 import requests
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_OWNER = os.getenv("GITHUB_OWNER")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/issues"
 
@@ -117,6 +119,50 @@ def get_ticket_issues(issue):
     return problems
 
 
+def get_ai_suggestions(issue):
+    title = issue.get("title", "")
+    body = issue.get("body", "") or ""
+
+    prompt = f"""
+You are a technical product owner assistant helping improve backlog tickets.
+
+Given this ticket:
+
+Title:
+{title}
+
+Body:
+{body}
+
+Provide the following:
+
+1. Improved Title
+2. Suggested User Value (1 sentence)
+3. Suggested Acceptance Criteria (3-5 bullet points)
+4. Suggested Subtasks (3-5 items)
+5. Clarifying Questions (2-3 questions)
+
+Keep it concise and practical.
+
+Format your response clearly with headings.
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful product operations assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"AI Error: {e}"
+
+
 # --- ANALYSIS ---
 
 def analyze_issues(issues):
@@ -135,7 +181,8 @@ def analyze_issues(issues):
             high_priority_bugs.append((number, title))
 
         if problems:
-            diagnostics.append((number, title, problems))
+            ai_suggestions = get_ai_suggestions(issue)
+            diagnostics.append((number, title, problems, ai_suggestions))
 
         if score >= 7:
             sprint_candidates.append((number, title, score))
@@ -158,10 +205,14 @@ def print_report(results):
         print("  - None")
 
     print("\n⚠️ Ticket Diagnostics:")
-    for number, title, problems in results["diagnostics"]:
+    for number, title, problems, ai in results["diagnostics"]:
         print(f"\n  #{number}: {title}")
         for p in problems:
             print(f"    - {p}")
+
+        print("\n 🤖 AI Suggestions:")
+        print(ai)
+
     if not results["diagnostics"]:
         print("  - None")
 
