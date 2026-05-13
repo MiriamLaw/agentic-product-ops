@@ -225,10 +225,54 @@ def print_report(results):
     print("\n=== End Report ===\n")
 
 
+# --- SLACK ---
+
+def post_to_slack(message: str):
+    webhook = os.getenv("SLACK_WEBHOOK_URL")
+
+    if not webhook:
+        print("No Slack webhook configured.")
+        return
+
+    payload = {
+        "text": message
+    }
+
+    response = requests.post(webhook, json=payload)
+
+    if response.status_code != 200:
+        print("Slack post failed:", response.text)
+
+
+def build_slack_message(results):
+    lines = []
+
+    lines.append("*Agentic Product Ops Report*")
+    lines.append("")
+
+    if results["diagnostics"]:
+        lines.append("*⚠️ Tickets Needing Attention:*")
+        for number, title, problems, _ in results["diagnostics"]:
+            lines.append(f"• #{number}: {title}")
+            for p in problems:
+                lines.append(f"   - {p}")
+            lines.append("")
+
+    if results["sprint_candidates"]:
+        lines.append("*🎯 Sprint Candidates:*")
+        for i in results["sprint_candidates"]:
+            lines.append(f"• #{i[0]}: {i[1]} (Score: {i[2]})")
+
+    return "\n".join(lines) 
+
+
 def main():
     issues = fetch_issues()
     results = analyze_issues(issues)
     print_report(results)
+
+    slack_message = build_slack_message(results)
+    post_to_slack(slack_message)
 
 
 if __name__ == "__main__":
